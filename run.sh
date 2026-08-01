@@ -1,7 +1,17 @@
-cmake -B build .
+# rebuild the build and go back to cmake from ninja 
+# cmake -G "Unix Makefiles" . 
 
-cmake --build build -j$(nproc)
+# cmake -B build .
 
-cd build && ./RacingGame_one
+# cmake --build build -j$(nproc)
 
-cd ../
+# cd build && ./RacingGame_one
+
+# cd ../
+
+#------------------------NINJA-----------------------
+# mkdir build & 
+cd build
+# cmake -G "Ninja" ..
+ninja
+./RacingGame_one

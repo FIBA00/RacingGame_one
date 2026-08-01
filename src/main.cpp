@@ -1,9 +1,23 @@
 #include <cute.h>
+
 using namespace Cute;
+
+// helper function to create a V2 from x and y coordinates
+float check_distance(CF_V2 a, CF_V2 b)
+{
+    float dx = b.x - a.x;
+    float dy = b.y - a.y;
+    return sqrtf(dx * dx + dy * dy);
+}
 
 int main(int argc, char *argv[])
 {
-    CF_Result result = make_app("Cute Test", 0, 0, 0, 1080, 600,
+    // global width and height
+    int width = 1080;
+    int height = 600;
+
+    // Use OpenGL instead of Vulkan
+    CF_Result result = make_app("Cute Test", 0, 0, 0, width, height,
                                 CF_APP_OPTIONS_WINDOW_POS_CENTERED_BIT, argv[0]);
     if (is_error(result))
     {
@@ -20,130 +34,81 @@ int main(int argc, char *argv[])
         float vel_x, vel_y;
     };
 
-    // player circle
-    Circle player;
-    player = {
-        x_pos : 0,
-        y_pos : 50,
-        radius : 25,
-        speed : 150.0f,
-        color : color_green(),
-        vel_x : 0,
-        vel_y : 0,
-    };
-
     // array of balls
     Circle circles[5];
+    circles[0] = {200, 50, 20, 100.0f, color_magenta(), 0, 0};
+    circles[1] = {-100, -50, 30, 100.0f, color_blue(), 0, 0};
+    circles[2] = {-200, 100, 40, 100.0f, color_purple(), 0, 0};
+    circles[3] = {-50, 200, 70, 100.0f, color_yellow(), 0, 0};
+    circles[4] = {-50, 200, 70, 100.0f, color_orange(), 0, 0};
 
-    // initialize them (postiions, colors , size)
-    circles[0] = {
-        200,
-        50,
-        20,
-        100.0f,
-        color_magenta(),
-        0,
-        0,
-    };
-    circles[1] = {
-        -100,
-        -50,
-        30,
-        100.0f,
-        color_blue(),
-        0,
-        0,
-    };
-
-    circles[2] = {
-        -200,
-        100,
-        40,
-        100.0f,
-        color_purple(),
-        0,
-        0,
-    };
-    circles[3] = {
-        -50,
-        200,
-        70,
-        100.0f,
-        color_yellow(),
-        0,
-        0,
-    };
-    circles[4] = {
-        -50,
-        200,
-        70,
-        100.0f,
-        color_orange(),
-        0,
-        0,
+    // Player circle
+    Circle player = {
+        .x_pos = 0,
+        .y_pos = 50,
+        .radius = 25,
+        .speed = 150.0f,
+        .color = color_white(),
     };
 
     while (app_is_running())
     {
         app_update();
-        // clear screen
-        // --- CLEAR THE SCREEN ---
-        cf_clear_color(0.0f, 0.0f, 0.0f, 0.0f); // R, G, B, A (0-1)
 
-        draw_push_color(color_red());
-        draw_circle_fill(V2(0, 0), 10);
+        // 1. CLEAR THE SCREEN
+        draw_push_color(CF_Color{0.1f, 0.1f, 0.1f, 1.0f});
+        draw_quad_fill(make_aabb(V2(0, 0), width, height), 0);
+        draw_pop_color();
 
-         // task 3 : Change your speed variable to a velocity (direction + magnitude), so:
+        // using dual controls for movement (WASD and arrow keys)
 
-        // If KEY_A is held → velocity = -50.0f(move left)
-        // If KEY_D is held → velocity = +50.0f(move right)
-        // If neither → velocity = 0.0f(stop)
-        // Then apply it : x_pos += velocity * CF_DELTA_TIME
-        if (key_down(CF_KEY_RIGHT))
-        {
-            player.x_pos += player.speed * CF_DELTA_TIME;
-        }
-        if (key_down(CF_KEY_LEFT))
+        if (key_down(CF_KEY_A) || key_down(CF_KEY_LEFT))
         {
             player.x_pos -= player.speed * CF_DELTA_TIME;
         }
-        if (key_down(CF_KEY_UP))
+
+        if (key_down(CF_KEY_D) || key_down(CF_KEY_RIGHT))
+        {
+            player.x_pos += player.speed * CF_DELTA_TIME;
+        }
+
+        if (key_down(CF_KEY_W) || key_down(CF_KEY_UP))
         {
             player.y_pos += player.speed * CF_DELTA_TIME;
         }
-        if (key_down(CF_KEY_DOWN))
+
+        if (key_down(CF_KEY_S) || key_down(CF_KEY_DOWN))
         {
             player.y_pos -= player.speed * CF_DELTA_TIME;
         }
 
-        // tasks 1: draw 4 circles, on in each cardinal direction from center, each different color
-        draw_push_color(color_green());
-        draw_circle_fill(V2(player.x_pos, player.y_pos), player.radius);
+        // collosion detection
+        for (int i = 0; i < 5; ++i){
+            float dist = check_distance(CF_V2{player.x_pos, player.y_pos}, CF_V2{circles[i].x_pos, circles[i].y_pos});
+            if (dist < player.radius + circles[i].radius){
+                printf("Collision detected with circle %d!\n", i);
+            }
+        }
+        // 3. DRAW EVERYTHING
+        // Red dot at origin
+        draw_push_color(color_red());
+        draw_circle_fill(make_circle(V2(player.x_pos, player.y_pos), 10));
         draw_pop_color();
 
-        // task 4: multiple balls
+        // Other circles
         for (int i = 0; i < 5; ++i)
         {
             draw_push_color(circles[i].color);
-            draw_circle_fill(V2(circles[i].x_pos, circles[i].y_pos), circles[i].radius);
+            draw_circle_fill(make_circle(V2(circles[i].x_pos, circles[i].y_pos), circles[i].radius));
             draw_pop_color();
         }
 
-        // task 2: drift green circle along +x each frame by speed * delta_time where speed is 50.0f
-        // green_circle_y_pos -= green_circle_speed * CF_DELTA_TIME;
+        // Player circle
+        draw_push_color(player.color);
+        cf_draw_circle_fill2(V2(player.x_pos, player.y_pos), player.radius);
+        draw_pop_color();
 
-        // draw_push_color(color_blue());
-        // draw_circle_fill(V2(-100, 0), 100);
-        // draw_pop_color();
-
-        // draw_push_color(color_yellow());
-        // draw_circle_fill(V2(0, 100), 20);
-        // draw_pop_color();
-
-        // draw_push_color(color_cyan());
-        // draw_circle_fill(V2(0, -100), 100);
-        // draw_pop_color();
-
+        // 4. PRESENT
         app_draw_onto_screen();
     }
 
