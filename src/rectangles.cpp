@@ -21,28 +21,24 @@ struct Circle
 };
 void update_player_position(Circle &player)
 {
-    float turn_speed = 3.0f; // radians per second
-
     if (key_down(CF_KEY_A) || key_down(CF_KEY_LEFT))
     {
-        player.heading += turn_speed * CF_DELTA_TIME;
+        player.x_pos -= player.speed * CF_DELTA_TIME;
     }
 
     if (key_down(CF_KEY_D) || key_down(CF_KEY_RIGHT))
     {
-        player.heading -= turn_speed * CF_DELTA_TIME;
+        player.x_pos += player.speed * CF_DELTA_TIME;
     }
 
     if (key_down(CF_KEY_W) || key_down(CF_KEY_UP))
     {
-        player.x_pos += cosf(player.heading) * player.speed * CF_DELTA_TIME;
-        player.y_pos += sinf(player.heading) * player.speed * CF_DELTA_TIME;
+        player.y_pos += player.speed * CF_DELTA_TIME;
     }
 
     if (key_down(CF_KEY_S) || key_down(CF_KEY_DOWN))
     {
-        player.x_pos -= cosf(player.heading) * player.speed * CF_DELTA_TIME;
-        player.y_pos -= sinf(player.heading) * player.speed * CF_DELTA_TIME;
+        player.y_pos -= player.speed * CF_DELTA_TIME;
     }
 }
 // Player circle
@@ -86,21 +82,16 @@ void draw_rectangle_shape()
 
 void draw_car(const Circle &player)
 {
-    float width = 120.0f;
-    float height = 40.0f;
+    float width = 200.0f;
+    float height = 200.0f;
 
     draw_push();                                // save the current coordinate system
     draw_translate(player.x_pos, player.y_pos); // move origin to car's position
-    draw_rotate(-player.heading);                // rotate around that new origin
+    draw_rotate(player.heading);                // rotate around that new origin
 
     CF_Aabb car_shape = cf_make_aabb_pos_w_h(V2(0, 0), width, height);
     draw_push_color(color_blue());
     draw_box_fill(car_shape, 0);
-    draw_pop_color();
-
-    // nose dot - sits on local +x wherever heading = 0 currently points
-    draw_push_color(color_red());
-    draw_circle_fill(V2(width / 2.0f, 0), 10);
     draw_pop_color();
 
     draw_pop(); // restore coordinate system to original state
@@ -136,7 +127,7 @@ int main(int argc, char *argv[])
         .radius = 25,
         .speed = 150.0f,
         .color = color_white(),
-        .heading = CF_PI / 2.0f, // 90 degrees in radians face +y
+        .heading = CF_PI / 4, // 45 degrees in radians
     };
 
     // rectangle
@@ -159,7 +150,6 @@ int main(int argc, char *argv[])
         // // collosion detection
         for (int i = 0; i < 5; ++i){
             float dist = check_distance(CF_V2{player.x_pos, player.y_pos}, CF_V2{circles[i].x_pos, circles[i].y_pos});
-
             if (dist < player.radius + circles[i].radius){
                 printf("Collision detected with circle %d!\n", i);
             }
