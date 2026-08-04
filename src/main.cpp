@@ -2,13 +2,8 @@
 
 using namespace Cute;
 
-// helper function to create a V2 from x and y coordinates
-float check_distance(CF_V2 a, CF_V2 b)
-{
-    float dx = b.x - a.x;
-    float dy = b.y - a.y;
-    return sqrtf(dx * dx + dy * dy);
-}
+const float CAR_WIDTH = 120.0f;
+const float CAR_HEIGHT = 40.0f;
 
 struct Circle
 {
@@ -19,9 +14,33 @@ struct Circle
     float vel_x, vel_y;
     float heading;
 };
+
+struct Rect
+{
+    float x_pos, y_pos;
+    float width, height;
+    CF_Color color;
+    float thickness;
+};
+
+void draw_circle(Circle &circles)
+{
+    draw_push_color(circles.color);
+    draw_circle_fill(make_circle(V2(circles.x_pos, circles.y_pos), circles.radius));
+    draw_pop_color();
+};
+
+void draw_rect(Rect &rects)
+{
+    draw_push_color(rects.color);
+    draw_quad_fill(make_aabb(V2(rects.x_pos, rects.y_pos), rects.width, rects.height), 0);
+    draw_pop_color();
+}
 void update_player_position(Circle &player)
 {
     float turn_speed = 3.0f; // radians per second
+    float acceleration = 400.0f;
+    float friction = 0.85f;
 
     if (key_down(CF_KEY_A) || key_down(CF_KEY_LEFT))
     {
@@ -35,76 +54,76 @@ void update_player_position(Circle &player)
 
     if (key_down(CF_KEY_W) || key_down(CF_KEY_UP))
     {
-        player.x_pos += cosf(player.heading) * player.speed * CF_DELTA_TIME;
-        player.y_pos += sinf(player.heading) * player.speed * CF_DELTA_TIME;
+        player.x_pos += cosf(player.heading) * acceleration * CF_DELTA_TIME;
+        player.y_pos += sinf(player.heading) * acceleration * CF_DELTA_TIME;
     }
 
     if (key_down(CF_KEY_S) || key_down(CF_KEY_DOWN))
     {
-        player.x_pos -= cosf(player.heading) * player.speed * CF_DELTA_TIME;
-        player.y_pos -= sinf(player.heading) * player.speed * CF_DELTA_TIME;
+        player.x_pos -= cosf(player.heading) * acceleration * CF_DELTA_TIME;
+        player.y_pos -= sinf(player.heading) * acceleration * CF_DELTA_TIME;
     }
-}
-// Player circle
-void draw_player_circle(const Circle &circle)
-{
-    draw_push_color(circle.color);
-    cf_draw_circle_fill2(V2(circle.x_pos, circle.y_pos), circle.radius);
-    draw_pop_color();
-}
+    // friction bleeds off speed every frame even without input
+    player.vel_x *= friction;
+    player.vel_y *= friction;
 
-void create_circle_shape(Circle &player)
-{
-    // using dual controls for movement (WASD and arrow keys)
-    update_player_position(player);
-    draw_player_circle(player);
-}
-
-void draw_rectangle_shape()
-{
-    // filled rectangle
-    // draw_push_color(color_yellow());
-    // draw_box_fill(V2(0, 0), 200.0f, 100.0f, 0.0f);
-    // draw_pop_color();
-
-    // outline rectangle
-    static float box_x = 0;
-    static float box_y = 0;
-    if (key_down(CF_KEY_A) || key_down(CF_KEY_LEFT))
-    {
-        box_x -= 200.0f * CF_DELTA_TIME;
-    }
-    if (key_down(CF_KEY_D) || key_down(CF_KEY_RIGHT))
-    {
-        box_x += 200.0f * CF_DELTA_TIME;
-    }
-
-    draw_push_color(color_red());
-    draw_box(V2(box_x, box_y), 200.0f, 100.0f, 4.0f);
-    draw_pop_color();
+    // velocity moves position
+    player.x_pos += player.vel_x * CF_DELTA_TIME;
+    player.y_pos += player.vel_y * CF_DELTA_TIME;
 }
 
 void draw_car(const Circle &player)
 {
-    float width = 120.0f;
-    float height = 40.0f;
 
     draw_push();                                // save the current coordinate system
     draw_translate(player.x_pos, player.y_pos); // move origin to car's position
-    draw_rotate(-player.heading);                // rotate around that new origin
+    draw_rotate(-player.heading);               // rotate around that new origin
 
-    CF_Aabb car_shape = cf_make_aabb_pos_w_h(V2(0, 0), width, height);
+    CF_Aabb car_shape = cf_make_aabb_pos_w_h(V2(0, 0), CAR_WIDTH, CAR_HEIGHT);
     draw_push_color(color_blue());
     draw_box_fill(car_shape, 0);
     draw_pop_color();
 
     // nose dot - sits on local +x wherever heading = 0 currently points
     draw_push_color(color_red());
-    draw_circle_fill(V2(width / 2.0f, 0), 10);
+    draw_circle_fill(V2(CAR_WIDTH / 2.0f, 0), 10);
     draw_pop_color();
 
     draw_pop(); // restore coordinate system to original state
 }
+// world-space AABB for the car, ignoring roation
+CF_Aabb car_world_aabb(const Circle &player)
+{
+    return cf_make_aabb_pos_w_h(V2(player.x_pos, player.y_pos), CAR_WIDTH, CAR_HEIGHT);
+}
+
+void resolve_car_circle_collision(Circle &player, const Circle &obstacle, const Rect &wall)
+{
+    CF_Circle circle_obstacles = cf_make_circle(V2(obstacle.x_pos, obstacle.y_pos), obstacle.radius);
+    CF_Aabb wall_aabb = cf_make_aabb_pos_w_h(V2(wall.x_pos, wall.y_pos), wall.width, wall.height);
+
+    CF_Aabb car_box = car_world_aabb(player);
+
+    CF_Manifold m = cf_circle_to_aabb_manifold(circle_obstacles, car_box);
+    CF_Manifold m2 = cf_circle_to_aabb_manifold(circle_obstacles, wall_aabb);
+    if (m.count == 0 && m2.count == 0)
+        return;
+
+    const CF_Manifold *hit = (m.count != 0) ? &m : &m2;
+
+    // hit.n points from the obstacle toward the car; push the car out
+    player.x_pos += hit->n.x * hit->depths[0];
+    player.y_pos += hit->n.y * hit->depths[0];
+
+    // cancel velocity into the surface
+    float dot = player.vel_x * hit->n.x + player.vel_y * hit->n.y;
+
+    if (dot < 0)
+    {
+        player.vel_x -= dot * hit->n.x;
+        player.vel_y -= dot * hit->n.y;
+    }
+};
 
 int main(int argc, char *argv[])
 {
@@ -138,8 +157,14 @@ int main(int argc, char *argv[])
         .color = color_white(),
         .heading = CF_PI / 2.0f, // 90 degrees in radians face +y
     };
+    
 
     // rectangle
+    Rect rects[3];
+    // Define a few track barriers for the car to collide with
+    rects[0] = {-100, -200, 300, 50, color_red(), 2.0f};
+    // rects[1] = {300, 360, 500, 50, color_green(), 2.0f};
+    // rects[2] = {400, 120, 500, 50, color_blue(), 2.0f};
 
     while (app_is_running())
     {
@@ -154,16 +179,12 @@ int main(int argc, char *argv[])
         // create_circle_shape(player);
         // draw_rectangle_shape();
         update_player_position(player);
-        draw_car(player);
 
         // // collosion detection
         for (int i = 0; i < 5; ++i){
-            float dist = check_distance(CF_V2{player.x_pos, player.y_pos}, CF_V2{circles[i].x_pos, circles[i].y_pos});
-
-            if (dist < player.radius + circles[i].radius){
-                printf("Collision detected with circle %d!\n", i);
-            }
+            resolve_car_circle_collision(player, circles[i], rects[0]);
         }
+        draw_car(player);
 
         // 3. DRAW EVERYTHING
         // Red dot at origin reference
@@ -174,9 +195,11 @@ int main(int argc, char *argv[])
         // Other circles
         for (int i = 0; i < 5; ++i)
         {
-            draw_push_color(circles[i].color);
-            draw_circle_fill(make_circle(V2(circles[i].x_pos, circles[i].y_pos), circles[i].radius));
-            draw_pop_color();
+            // draw_push_color(circles[i].color);
+            // draw_circle_fill(make_circle(V2(circles[i].x_pos, circles[i].y_pos), circles[i].radius));
+            // draw_pop_color();
+            draw_circle(circles[i]);
+            draw_rect(rects[i]);
         }
 
         // 4. PRESENT
