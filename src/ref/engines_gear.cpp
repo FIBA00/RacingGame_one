@@ -1,0 +1,364 @@
+#include <cute.h>
+using namespace Cute;
+
+int WIN_WIDTH = 1380;
+int WIN_HEIGHT = 800;
+const float CAR_WIDTH = 200.0f;
+const float CAR_HEIGHT = 60.0f;
+
+struct Rect
+{
+    float x_pos, y_pos;
+    float width, height;
+    CF_Color color;
+    float thicknes;
+    float heading;
+    float speed;
+    float vel_x, vel_y;
+    int gear;           // 1 - 5, starts in 1
+    float rpm;          // 0 - 8000
+    float engine_power; // varies by gear
+};
+
+struct Obstacle
+{
+    float x_pos, y_pos;
+    float radius;
+    CF_Color color;
+};
+
+void draw_minimap(const Rect &car, const Obstacle obstacles[], int obs_count, int WIN_WIDTH, int WIN_HEIGHT, float world_width, float world_height)
+{
+    // minimap is 200x150 pixels , top-right corner with padding
+    float minimap_x = WIN_WIDTH - 220;
+    float minimap_y = 20;
+    float minimap_w = 200;
+    float minimap_h = 150;
+
+    // draw minimap background (semi-transparent dark)
+    draw_push_color(CF_Color{0, 0, 0, 0.7f});
+    draw_quad_fill(make_aabb(V2(minimap_x, minimap_y), minimap_w, minimap_h), 0);
+    draw_pop_color();
+
+    // draw minimap border
+    draw_push_color(color_white());
+    draw_box(V2(minimap_x + minimap_w / 2, minimap_y + minimap_h / 2), minimap_w, minimap_h, 2.0f);
+    draw_pop_color();
+
+    // scale factor : world to minimap pixels
+    float scale_x = minimap_w / world_width;
+    float scale_y = minimap_h / world_height;
+
+    // center of minimap in screen space
+    float center_x = minimap_x + minimap_w / 2;
+    float center_y = minimap_y + minimap_h / 2;
+
+    // Draw obstacles (small circles)
+    for (int i = 0; i < obs_count; ++i)
+    {
+        float mm_x = center_x + obstacles[i].x_pos * scale_x;
+        float mm_y = center_y + obstacles[i].y_pos * scale_y;
+
+        draw_push_color(obstacles[i].color);
+        draw_circle_fill(make_circle(V2(mm_x, mm_y), 4));
+        draw_pop_color();
+    }
+
+    // draw car (small triangle pointing heading direction)'
+    float mm_car_x = center_x + car.x_pos * scale_x;
+    float mm_car_y = center_y + car.y_pos * scale_y;
+
+    draw_push_color(color_red());
+    draw_circle_fill(make_circle(V2(mm_car_x, mm_car_y), 5));
+    draw_pop_color();
+};
+
+void draw_hud(const Rect &car, int WIN_WIDTH, int WIN_HEIGHT)
+{
+    float speed_magnitude = sqrtf(car.vel_x * car.vel_x + car.vel_y * car.vel_y);
+
+    // Gear indicator
+    draw_push_color(color_white());
+    draw_text(V2(50, 50), 0, 0, "Gear: %id", car.gear);
+    draw_pop_color();
+
+    // Speed
+    draw_push_color(color_cyan());
+    draw_text(V2(50, 100), 0, 0, "Speed: %.0f px/s", speed_magnitude);
+    draw_pop_color();
+
+    // RPM
+    draw_push_color(color_yellow());
+    draw_text(V2(50, 150), 0, 0, "RPM: %.0f", car.rpm);
+    draw_pop_color();
+
+    // Position
+    draw_push_color(color_magenta());
+    draw_text(V2(50, 200), 0, 0, "Pos: (%.0f, %.0f)", car.x_pos, car.y_pos);
+    draw_pop_color();
+}
+
+void apply_speed_cap(Rect &car, float max_speed)
+{
+    float magnitude = sqrtf(car.vel_x * car.vel_x + car.vel_y * car.vel_y);
+    if (magnitude > max_speed)
+    {
+        car.vel_x = (car.vel_x / magnitude) * max_speed;
+        car.vel_y = (car.vel_y / magnitude) * max_speed;
+    }
+};
+void draw_car(const Rect &car)
+{
+    draw_push();
+    draw_translate(car.x_pos, car.y_pos);
+    draw_rotate(-car.heading);
+
+    CF_Aabb car_shape = cf_make_aabb_pos_w_h(V2(0, 0), CAR_WIDTH, CAR_HEIGHT);
+    draw_push_color(car.color);
+    draw_box_fill(car_shape, 0);
+    draw_pop_color();
+
+    // nose dot - put on local +x so forward aligns with (cos, sin)
+    draw_push_color(color_white());
+    draw_circle_fill(V2(CAR_WIDTH / 2.0f, 0), 8);
+    draw_pop_color();
+
+    draw_pop();
+};
+
+void draw_obstacle(const Obstacle &obs)
+{
+    draw_push_color(obs.color);
+    draw_circle_fill(make_circle(V2(obs.x_pos, obs.y_pos), obs.radius));
+    draw_pop_color();
+};
+
+void update_car_position(Rect &car)
+{
+    float turn_speed = CF_PI / 4.0f; // radians per second
+    float friction = 0.92f;
+    float max_rpm = car.rpm;
+    float idle_rpm = 500.0f;
+
+    // (turning (independent of throttle))
+    if (key_down(CF_KEY_A) || key_down(CF_KEY_LEFT))
+    {
+        car.heading += turn_speed * CF_DELTA_TIME;
+    }
+
+    if (key_down(CF_KEY_D) || key_down(CF_KEY_RIGHT))
+    {
+        car.heading -= turn_speed * CF_DELTA_TIME;
+    }
+
+    // Automatic gear shifting based on speed
+    float speed_magnitude = sqrtf(car.vel_x * car.vel_x + car.vel_y * car.vel_y);
+    if (speed_magnitude < 50.0f)
+    {
+        car.gear = 1;
+    }
+    else if (speed_magnitude < 120.0f)
+    {
+        car.gear = 2;
+    }
+    else if (speed_magnitude < 200.0f)
+    {
+        car.gear = 3;
+    }
+    else if (speed_magnitude < 280.0f)
+    {
+        car.gear = 4;
+    }
+    else
+    {
+        car.gear = 5;
+    }
+
+    // gear determines acceleration and RPM scaling
+    float gear_accel[] = {0, 1200.0f, 900.0f, 600.0f, 400.0f, 250.0f}; // index 0 unused
+    float acceleration = gear_accel[car.gear];
+
+    // Throttle(W) and braking (S)
+    if (key_down(CF_KEY_W) || key_down(CF_KEY_UP))
+    {
+        car.vel_x += cosf(car.heading) * acceleration * CF_DELTA_TIME;
+        car.vel_y += sinf(car.heading) * acceleration * CF_DELTA_TIME;
+        car.rpm += 2000.0f * CF_DELTA_TIME; // engine spins up
+    }
+
+    if (key_down(CF_KEY_S) || key_down(CF_KEY_DOWN))
+    {
+        car.vel_x -= cosf(car.heading) * acceleration * CF_DELTA_TIME;
+        car.vel_y -= sinf(car.heading) * acceleration * CF_DELTA_TIME;
+        car.rpm -= 1500.0f * CF_DELTA_TIME; // engine decelerates
+    }
+
+    // RPM ticks down when not throttling , bottoms at idle
+    if (!key_down(CF_KEY_W) && !key_down(CF_KEY_UP))
+    {
+        car.rpm -= 1000.0f * CF_DELTA_TIME;
+    }
+    car.rpm = fmaxf(idle_rpm, fminf(car.rpm, max_rpm)); // clamp to [idle, max]
+
+    // friction bleeds off speed every frame even without input
+    car.vel_x *= friction;
+    car.vel_y *= friction;
+
+    // velocity moves position
+    car.x_pos += car.vel_x * CF_DELTA_TIME;
+    car.y_pos += car.vel_y * CF_DELTA_TIME;
+};
+
+// Builds a world-space AABB centered on the car for collision math.
+// This is separate from the one in draw_car - that one lives inside a rotated
+// draw stack and can't be used for physics
+
+CF_Aabb car_world_aabb(const Rect &car)
+{
+    return cf_make_aabb_pos_w_h(V2(car.x_pos, car.y_pos), CAR_WIDTH, CAR_HEIGHT);
+};
+
+void resolve_collision(Rect &car, const Obstacle &obs)
+{
+    // Wrap obstacle into CF_Circle type that CF's manifold function expects
+    CF_Circle c = cf_make_circle(V2(obs.x_pos, obs.y_pos), obs.radius);
+    CF_Aabb box = car_world_aabb(car);
+
+    // cf_circle_to_aabb_manifold returns:
+    // m.count     - 0 means no overlap , 1 means overlap
+    // m.depths[0] - How deep the overlap is (in pixels)
+    // m.n         - direction from circle center toward the AABB (push direction)
+    CF_Manifold m = cf_circle_to_aabb_manifold(c, box);
+    if (m.count == 0)
+        return;
+
+    // Step 1: push position out so they no longer overlap
+    car.x_pos += m.n.x * m.depths[0];
+    car.y_pos += m.n.y * m.depths[0];
+
+    // Step 2: cancel the velocity component pointing INTO the obstacle.
+    // dot product measures "how much of our velocity is aimed along m.n"
+    // If dot < 0, we're moving against m.n = moving INTO the surface.
+    // Subtracting (dot * n) removes just that inward part, leaving sideways velocity intact.
+    // This is why the car slides along obstacle instead of stopping dead.
+
+    float dot = car.vel_x * m.n.x + car.vel_y * m.n.y;
+    if (dot < 0)
+    {
+        car.vel_x -= dot * m.n.x;
+        car.vel_y -= dot * m.n.y;
+    }
+};
+
+// rectangular wall
+void draw_track_boundary(Rect &car)
+{
+    // track_boundary
+    float track_width = 2000.0f;
+    float track_height = 1500.0f;
+    draw_push_color(CF_Color{0.3f, 0.3f, 0.3f, 1.0f});
+    draw_box(V2(0, 0), track_width, track_height, 20.0f); // outline, 20px thick
+    draw_pop_color();
+
+    // add collision with track boundary
+    CF_Aabb track = cf_make_aabb_pos_w_h(V2(0, 0), track_width, track_height);
+    CF_Aabb car_box = car_world_aabb(car);
+    CF_Manifold track_collision = cf_aabb_to_aabb_manifold(car_box, track);
+
+    if (track_collision.count > 0)
+    {
+        car.x_pos += track_collision.n.x * track_collision.depths[0];
+        car.y_pos += track_collision.n.y * track_collision.depths[0];
+
+        float dot = car.vel_x * track_collision.n.x + car.vel_y * track_collision.n.y;
+        if (dot < 0)
+        {
+            car.vel_x -= dot * track_collision.n.x;
+            car.vel_y -= dot * track_collision.n.y;
+        }
+    }
+};
+
+int main(int argc, char *argv[])
+{
+
+    CF_Result result = make_app("Racing Game one", 0, 0, 0, WIN_WIDTH, WIN_HEIGHT, CF_APP_OPTIONS_WINDOW_POS_CENTERED_BIT, argv[0]);
+    if (is_error(result))
+    {
+        printf("Error: %s\n", result.details);
+        return -1;
+    }
+    Rect car = {
+        .x_pos = 200,
+        .y_pos = 200,
+        .color = color_red(),
+        .heading = CF_PI / 2.0f,
+        .speed = 400.0f,
+        .vel_x = 0,
+        .vel_y = 0,
+        .gear = 1,
+        .rpm = 500.0f,
+        .engine_power = 0,
+    };
+
+    // A handful of obstacles scattered around the origin.
+    // Adjust positions to taste  these are in world space, same coords as car.
+    const int OBS_COUNT = 5;
+    Obstacle obstacles[OBS_COUNT] = {
+        {200, 150, 30, color_magenta()},
+        {-150, 250, 40, color_yellow()},
+        {300, -100, 25, color_orange()},
+        {-250, -200, 35, color_purple()},
+        {100, 350, 20, color_blue()}};
+
+    while (app_is_running())
+    {
+
+        app_update();
+
+        // Update first, resolve collisions, then draw
+        // so the position drawn is always post-correction (no one-frame overlap flicker)
+        update_car_position(car);
+
+        for (int i = 0; i < OBS_COUNT; ++i)
+        {
+            resolve_collision(car, obstacles[i]);
+        }
+        // max speed 400 pixels/sec
+        apply_speed_cap(car, car.speed);
+
+        // background in screen space (Stay fixed, fills entire window always)
+        draw_push_color(CF_Color{0.1f, 0.1f, 0.1f, 1.0f});
+        draw_quad_fill(make_aabb(V2(0, 0), WIN_WIDTH, WIN_HEIGHT), 0);
+        draw_pop_color();
+
+        // Now camera transform - everything inside this is world space
+        draw_push();
+        draw_translate(-car.x_pos, -car.y_pos); // camera follows car
+
+        // central dot
+        draw_push_color(color_green());
+        draw_circle_fill(make_circle(V2(0, 0), 5));
+        draw_pop_color();
+
+        // Track boundary
+        draw_track_boundary(car);
+
+        for (int i = 0; i < OBS_COUNT; ++i)
+        {
+            draw_obstacle(obstacles[i]);
+        }
+
+        // car
+        draw_car(car);
+        // restore to screen space
+        draw_pop();
+
+        // HUD in screen space
+        // draw_hud(car, WIN_WIDTH, WIN_HEIGHT);
+        draw_minimap(car, obstacles, OBS_COUNT, WIN_WIDTH, WIN_HEIGHT, 3000.0f, 3000.0f);
+        app_draw_onto_screen();
+    }
+    destroy_app();
+    return 0;
+}
