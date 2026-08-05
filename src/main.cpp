@@ -4,6 +4,7 @@
 #include "physics.h"
 #include "render.h"
 #include "hud.h"
+#include "loading.h"
 
 using namespace Cute;
 
@@ -15,6 +16,7 @@ int main(int argc, char *argv[])
         printf("Error: %s\n", result.details);
         return -1;
     }
+
     GamePhase phase = PHASE_LOADING;
     LoadingState loading = {};
     loading_init(loading, 3.0f); // 3 second loading screen
@@ -41,14 +43,58 @@ int main(int argc, char *argv[])
     {
         app_update();
 
-        // background (screen space)
-        draw_push_color(CF_Color{0.1f, 0.1f, 0.1f, 1.0f});
-        draw_quad_fill(make_aabb(V2(0, 0), WIN_WIDTH, WIN_HEIGHT), 0);
-        draw_pop_color();
+        if (phase == PHASE_LOADING)
+        {
+            loading_update(loading, CF_DELTA_TIME);
 
-        // Hud (Screen Space)
-        hud_draw_stats(game.car);
-        hud_draw_minimap(game.car, game.obstacles, OBS_COUNT);
+            // background (screen space)
+            draw_push_color(CF_Color{0.1f, 0.1f, 0.1f, 1.0f});
+            draw_quad_fill(make_aabb(V2(0, 0), WIN_WIDTH, WIN_HEIGHT), 0);
+            draw_pop_color();
+
+            // loading screen overlay
+            loading_draw(loading);
+            if (loading.done)
+            {
+                phase = PHASE_PLAYING;
+            }
+        }
+        else if (phase == PHASE_PLAYING)
+        {
+            // Physics
+            physics_update_car(game.car, CF_DELTA_TIME);
+            for (int i = 0; i < OBS_COUNT; ++i)
+            {
+                physics_resolve_circle_collision(game.car, game.obstacles[i]);
+            }
+            physics_resolve_track_collision(game.car);
+            physics_apply_speed_cap(game.car, 500.0f);
+
+            // background (screen space)
+            draw_push_color(CF_Color{0.1f, 0.1f, 0.1f, 1.0f});
+            draw_quad_fill(make_aabb(V2(0, 0), WIN_WIDTH, WIN_HEIGHT), 0);
+            draw_pop_color();
+
+            // world (camera follow)
+            draw_push();
+            draw_translate(-game.car.x_pos, -game.car.y_pos);
+
+            // Render
+            render_world_origin();
+            render_track();
+            for (int i = 0; i < OBS_COUNT; ++i)
+            {
+                render_obstacle(game.obstacles[i]);
+            }
+            render_car(game.car);
+
+            draw_pop();
+
+            // Hud (Screen Space)
+            hud_draw_stats(game.car);
+            hud_draw_minimap(game.car, game.obstacles, OBS_COUNT);
+        }
+
         app_draw_onto_screen();
     }
     destroy_app();

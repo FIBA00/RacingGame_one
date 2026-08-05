@@ -107,6 +107,7 @@ void apply_speed_cap(Rect &car, float max_speed)
         car.vel_y = (car.vel_y / magnitude) * max_speed;
     }
 };
+
 void draw_car(const Rect &car)
 {
     draw_push();
