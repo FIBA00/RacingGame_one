@@ -1,10 +1,12 @@
 #include <cute.h>
 #include "config.h"
 #include "types.h"
-#include "physics.h"
-#include "render.h"
+
 #include "hud.h"
 #include "loading.h"
+
+#include "engine/physics.h"
+#include "engine/render.h"
 
 using namespace Cute;
 
@@ -91,7 +93,7 @@ int main(int argc, char *argv[])
             draw_pop();
 
             // Hud (Screen Space)
-            hud_draw_stats(game.car);
+            hud_draw_stats(game);
             hud_draw_minimap(game.car, game.obstacles, OBS_COUNT);
         }
 
